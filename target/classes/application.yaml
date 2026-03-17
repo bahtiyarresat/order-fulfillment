@@ -1,0 +1,22 @@
+# ════════════════════════════════════════════════════════════════════
+# Base configuration — shared by all profiles
+#
+# Profile selection:
+#   Local Camunda Run  →  default (no profile)
+#   Docker Compose     →  -Dspring.profiles.active=docker
+#
+# IntelliJ'de Run Configuration → Active profiles: docker
+# ════════════════════════════════════════════════════════════════════
+
+spring:
+  application:
+    name: order-fulfillment-engine
+
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.example.fulfillment: DEBUG
+    io.camunda: WARN

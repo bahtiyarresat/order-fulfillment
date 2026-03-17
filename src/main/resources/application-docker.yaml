@@ -1,0 +1,27 @@
+# ════════════════════════════════════════════════════════════════════
+# Profile: docker
+#
+# Camunda 8.8.7 For Docker Compose stack.
+#
+# To activate:
+#   IntelliJ → Run Configuration → Active profiles: docker
+#   or: mvn spring-boot:run -Dspring-boot.run.profiles=docker
+#
+# Modeler connection:
+#   Target: Camunda 8 Self-Managed
+#   Cluster URL: http://localhost:8088
+#   Authentication: None
+# ════════════════════════════════════════════════════════════════════
+
+camunda:
+  client:
+    mode: self-managed
+    auth:
+      method: none
+    zeebe:
+      grpc-address: http://localhost:26500
+      rest-address: http://localhost:8088    # Camunda 8.8 REST port 8088
+      prefer-rest-over-grpc: false
+    worker:
+      default-name: order-fulfillment-worker
+      default-max-jobs-active: 32

@@ -1,0 +1,469 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_OrderFulfillment" targetNamespace="http://example.com/order-fulfillment" exporter="Camunda Modeler" exporterVersion="5.45.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.8.0">
+  <bpmn:message id="Message_CustomerUpdatedPriority" name="CustomerUpdatedPriority">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="= orderId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+
+  <bpmn:collaboration id="Collaboration_OrderFulfillment">
+    <bpmn:participant id="Participant_OrderFulfillmentEngine" name="Order Fulfillment Engine" processRef="order_fulfillment_process" />
+  </bpmn:collaboration>
+
+  <bpmn:process id="order_fulfillment_process" name="Order Fulfillment Process" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_OrderReceived" name="Order Received&#10;(Webhook)">
+      <bpmn:outgoing>Flow_Start_To_Validate</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_ValidateCredit" name="Validate Customer Credit">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="validate-credit" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Start_To_Validate</bpmn:incoming>
+      <bpmn:outgoing>Flow_Validate_To_CreditDecision</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_CreditDecision" name="Credit Decision?">
+      <bpmn:incoming>Flow_Validate_To_CreditDecision</bpmn:incoming>
+      <bpmn:outgoing>Flow_Credit_Approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Credit_Rejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Credit_Review</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:sequenceFlow id="Flow_Credit_Approved" name="Approved" sourceRef="Gateway_CreditDecision" targetRef="Gateway_CreditSecuredMerge">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= creditDecision = "Approved"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_Credit_Rejected" name="Rejected" sourceRef="Gateway_CreditDecision" targetRef="EndEvent_OrderRejected">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= creditDecision = "Rejected"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_Credit_Review" name="Review" sourceRef="Gateway_CreditDecision" targetRef="Task_ManagerManualReview">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= creditDecision = "Review"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:userTask id="Task_ManagerManualReview" name="Manager Manual Review">
+      <bpmn:extensionElements>
+        <zeebe:assignmentDefinition candidateGroups="finance-managers" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Credit_Review</bpmn:incoming>
+      <bpmn:outgoing>Flow_ManualReview_To_Decision</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:boundaryEvent id="Boundary_Timer_ManualReviewTimeout" name="10 Minutes Timeout" attachedToRef="Task_ManagerManualReview">
+      <bpmn:outgoing>Flow_Timer_To_AutoCancel</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerDef_10Min">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT10M</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+
+    <bpmn:boundaryEvent id="Boundary_Message_PriorityUpdated" name="Customer Updated Priority" cancelActivity="false" attachedToRef="Task_ManagerManualReview">
+      <bpmn:outgoing>Flow_Message_To_UpdateSla</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageDef_Priority" messageRef="Message_CustomerUpdatedPriority" />
+    </bpmn:boundaryEvent>
+
+    <bpmn:serviceTask id="Task_UpdateSlaLog" name="Update SLA Log">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="update-sla-log" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Message_To_UpdateSla</bpmn:incoming>
+      <bpmn:outgoing>Flow_UpdateSla_To_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_SlaUpdated" name="SLA Log Updated">
+      <bpmn:incoming>Flow_UpdateSla_To_End</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:exclusiveGateway id="Gateway_ManualReviewDecision" name="Manual Review Decision?">
+      <bpmn:incoming>Flow_ManualReview_To_Decision</bpmn:incoming>
+      <bpmn:outgoing>Flow_ManualReview_Approved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ManualReview_Rejected</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:sequenceFlow id="Flow_ManualReview_Approved" name="Approved" sourceRef="Gateway_ManualReviewDecision" targetRef="Gateway_CreditSecuredMerge">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= manualReviewDecision = "Approved"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_ManualReview_Rejected" name="Rejected" sourceRef="Gateway_ManualReviewDecision" targetRef="EndEvent_OrderRejected">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= manualReviewDecision = "Rejected"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:endEvent id="EndEvent_OrderRejected" name="Order Rejected">
+      <bpmn:incoming>Flow_Credit_Rejected</bpmn:incoming>
+      <bpmn:incoming>Flow_ManualReview_Rejected</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:exclusiveGateway id="Gateway_CreditSecuredMerge" name="Credit Secured">
+      <bpmn:incoming>Flow_Credit_Approved</bpmn:incoming>
+      <bpmn:incoming>Flow_ManualReview_Approved</bpmn:incoming>
+      <bpmn:outgoing>Flow_Merge_To_ParallelSplit</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:parallelGateway id="Gateway_ParallelSplit" name="Fulfillment Split">
+      <bpmn:incoming>Flow_Merge_To_ParallelSplit</bpmn:incoming>
+      <bpmn:outgoing>Flow_To_ReserveInventory</bpmn:outgoing>
+      <bpmn:outgoing>Flow_To_GenerateInvoice</bpmn:outgoing>
+    </bpmn:parallelGateway>
+
+    <bpmn:sequenceFlow id="Flow_Merge_To_ParallelSplit" sourceRef="Gateway_CreditSecuredMerge" targetRef="Gateway_ParallelSplit" />
+
+    <bpmn:serviceTask id="Task_ReserveInventory" name="Reserve Inventory">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="reserve-inventory" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_To_ReserveInventory</bpmn:incoming>
+      <bpmn:outgoing>Flow_ReserveInventory_To_ParallelJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_GenerateInvoicePdf" name="Generate Invoice PDF">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="generate-invoice-pdf" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_To_GenerateInvoice</bpmn:incoming>
+      <bpmn:outgoing>Flow_GenerateInvoice_To_ParallelJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:parallelGateway id="Gateway_ParallelJoin" name="Fulfillment Joined">
+      <bpmn:incoming>Flow_ReserveInventory_To_ParallelJoin</bpmn:incoming>
+      <bpmn:incoming>Flow_GenerateInvoice_To_ParallelJoin</bpmn:incoming>
+      <bpmn:outgoing>Flow_ParallelJoin_To_NotificationSplit</bpmn:outgoing>
+    </bpmn:parallelGateway>
+
+    <bpmn:inclusiveGateway id="Gateway_NotificationSplit" name="Select Notification Channel?">
+      <bpmn:incoming>Flow_ParallelJoin_To_NotificationSplit</bpmn:incoming>
+      <bpmn:outgoing>Flow_SendEmail</bpmn:outgoing>
+      <bpmn:outgoing>Flow_SendSms</bpmn:outgoing>
+    </bpmn:inclusiveGateway>
+
+    <bpmn:serviceTask id="Task_SendEmail" name="Send Email">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-email" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_SendEmail</bpmn:incoming>
+      <bpmn:outgoing>Flow_Email_To_NotificationJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_SendSms" name="Send SMS">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-sms" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_SendSms</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sms_To_NotificationJoin</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:inclusiveGateway id="Gateway_NotificationJoin" name="Notifications Sent">
+      <bpmn:incoming>Flow_Email_To_NotificationJoin</bpmn:incoming>
+      <bpmn:incoming>Flow_Sms_To_NotificationJoin</bpmn:incoming>
+      <bpmn:outgoing>Flow_To_OrderFulfilled</bpmn:outgoing>
+    </bpmn:inclusiveGateway>
+
+    <bpmn:endEvent id="EndEvent_OrderFulfilled" name="Order Fulfilled">
+      <bpmn:incoming>Flow_To_OrderFulfilled</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="EndEvent_AutoCancelOrder" name="Auto-Cancel Order">
+      <bpmn:incoming>Flow_Timer_To_AutoCancel</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Start_To_Validate" sourceRef="StartEvent_OrderReceived" targetRef="Task_ValidateCredit" />
+    <bpmn:sequenceFlow id="Flow_Validate_To_CreditDecision" sourceRef="Task_ValidateCredit" targetRef="Gateway_CreditDecision" />
+    <bpmn:sequenceFlow id="Flow_ManualReview_To_Decision" sourceRef="Task_ManagerManualReview" targetRef="Gateway_ManualReviewDecision" />
+    <bpmn:sequenceFlow id="Flow_Timer_To_AutoCancel" sourceRef="Boundary_Timer_ManualReviewTimeout" targetRef="EndEvent_AutoCancelOrder" />
+    <bpmn:sequenceFlow id="Flow_Message_To_UpdateSla" sourceRef="Boundary_Message_PriorityUpdated" targetRef="Task_UpdateSlaLog" />
+    <bpmn:sequenceFlow id="Flow_UpdateSla_To_End" sourceRef="Task_UpdateSlaLog" targetRef="EndEvent_SlaUpdated" />
+    <bpmn:sequenceFlow id="Flow_To_ReserveInventory" sourceRef="Gateway_ParallelSplit" targetRef="Task_ReserveInventory" />
+    <bpmn:sequenceFlow id="Flow_To_GenerateInvoice" sourceRef="Gateway_ParallelSplit" targetRef="Task_GenerateInvoicePdf" />
+    <bpmn:sequenceFlow id="Flow_ReserveInventory_To_ParallelJoin" sourceRef="Task_ReserveInventory" targetRef="Gateway_ParallelJoin" />
+    <bpmn:sequenceFlow id="Flow_GenerateInvoice_To_ParallelJoin" sourceRef="Task_GenerateInvoicePdf" targetRef="Gateway_ParallelJoin" />
+    <bpmn:sequenceFlow id="Flow_ParallelJoin_To_NotificationSplit" sourceRef="Gateway_ParallelJoin" targetRef="Gateway_NotificationSplit" />
+
+    <bpmn:sequenceFlow id="Flow_SendEmail" name="Email / Both" sourceRef="Gateway_NotificationSplit" targetRef="Task_SendEmail">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= notificationPreference = "Email" or notificationPreference = "Both"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_SendSms" name="SMS / Both" sourceRef="Gateway_NotificationSplit" targetRef="Task_SendSms">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= notificationPreference = "SMS" or notificationPreference = "Both"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_Email_To_NotificationJoin" sourceRef="Task_SendEmail" targetRef="Gateway_NotificationJoin" />
+    <bpmn:sequenceFlow id="Flow_Sms_To_NotificationJoin" sourceRef="Task_SendSms" targetRef="Gateway_NotificationJoin" />
+    <bpmn:sequenceFlow id="Flow_To_OrderFulfilled" sourceRef="Gateway_NotificationJoin" targetRef="EndEvent_OrderFulfilled" />
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_OrderFulfillment">
+    <bpmndi:BPMNPlane id="BPMNPlane_OrderFulfillment" bpmnElement="Collaboration_OrderFulfillment">
+      <bpmndi:BPMNShape id="Shape_Participant" bpmnElement="Participant_OrderFulfillmentEngine" isHorizontal="true">
+        <dc:Bounds x="120" y="60" width="2060" height="530" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_StartEvent" bpmnElement="StartEvent_OrderReceived">
+        <dc:Bounds x="172" y="272" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="152" y="315" width="77" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ValidateCredit" bpmnElement="Task_ValidateCredit">
+        <dc:Bounds x="260" y="250" width="140" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_CreditDecision" bpmnElement="Gateway_CreditDecision" isMarkerVisible="true">
+        <dc:Bounds x="455" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="438" y="322" width="85" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ManagerManualReview" bpmnElement="Task_ManagerManualReview">
+        <dc:Bounds x="560" y="250" width="150" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_UpdateSlaLog" bpmnElement="Task_UpdateSlaLog">
+        <dc:Bounds x="660" y="430" width="140" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_SlaUpdated" bpmnElement="EndEvent_SlaUpdated">
+        <dc:Bounds x="852" y="452" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="830" y="495" width="80" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_ManualReviewDecision" bpmnElement="Gateway_ManualReviewDecision" isMarkerVisible="true">
+        <dc:Bounds x="770" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="748" y="322" width="95" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_OrderRejected" bpmnElement="EndEvent_OrderRejected">
+        <dc:Bounds x="462" y="112" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="441" y="155" width="78" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_CreditSecuredMerge" bpmnElement="Gateway_CreditSecuredMerge" isMarkerVisible="true">
+        <dc:Bounds x="885" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="864" y="322" width="92" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_ParallelSplit" bpmnElement="Gateway_ParallelSplit" isMarkerVisible="true">
+        <dc:Bounds x="1000" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="976" y="322" width="98" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_ReserveInventory" bpmnElement="Task_ReserveInventory">
+        <dc:Bounds x="1110" y="190" width="150" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_GenerateInvoicePdf" bpmnElement="Task_GenerateInvoicePdf">
+        <dc:Bounds x="1110" y="350" width="150" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_ParallelJoin" bpmnElement="Gateway_ParallelJoin" isMarkerVisible="true">
+        <dc:Bounds x="1325" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1306" y="322" width="89" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_NotificationSplit" bpmnElement="Gateway_NotificationSplit" isMarkerVisible="true">
+        <dc:Bounds x="1440" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1415" y="322" width="100" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SendEmail" bpmnElement="Task_SendEmail">
+        <dc:Bounds x="1560" y="190" width="140" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Task_SendSms" bpmnElement="Task_SendSms">
+        <dc:Bounds x="1560" y="350" width="140" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Gateway_NotificationJoin" bpmnElement="Gateway_NotificationJoin" isMarkerVisible="true">
+        <dc:Bounds x="1770" y="265" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1751" y="322" width="88" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_OrderFulfilled" bpmnElement="EndEvent_OrderFulfilled">
+        <dc:Bounds x="1892" y="272" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1868" y="315" width="85" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_EndEvent_AutoCancel" bpmnElement="EndEvent_AutoCancelOrder">
+        <dc:Bounds x="482" y="442" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="470" y="485" width="61" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Boundary_Message" bpmnElement="Boundary_Message_PriorityUpdated">
+        <dc:Bounds x="672" y="312" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="655" y="355" width="70" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Boundary_Timer" bpmnElement="Boundary_Timer_ManualReviewTimeout">
+        <dc:Bounds x="622" y="312" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="605" y="355" width="70" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Start_Validate" bpmnElement="Flow_Start_To_Validate">
+        <di:waypoint x="208" y="290" />
+        <di:waypoint x="260" y="290" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Validate_CreditDecision" bpmnElement="Flow_Validate_To_CreditDecision">
+        <di:waypoint x="400" y="290" />
+        <di:waypoint x="455" y="290" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Credit_Approved" bpmnElement="Flow_Credit_Approved">
+        <di:waypoint x="480" y="265" />
+        <di:waypoint x="480" y="230" />
+        <di:waypoint x="910" y="230" />
+        <di:waypoint x="910" y="265" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="676" y="210" width="48" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Credit_Rejected" bpmnElement="Flow_Credit_Rejected">
+        <di:waypoint x="480" y="265" />
+        <di:waypoint x="480" y="148" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="488" y="198" width="46" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Credit_Review" bpmnElement="Flow_Credit_Review">
+        <di:waypoint x="505" y="290" />
+        <di:waypoint x="560" y="290" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="520" y="270" width="38" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_ManualReview_Decision" bpmnElement="Flow_ManualReview_To_Decision">
+        <di:waypoint x="710" y="290" />
+        <di:waypoint x="770" y="290" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_ManualReview_Approved" bpmnElement="Flow_ManualReview_Approved">
+        <di:waypoint x="820" y="290" />
+        <di:waypoint x="885" y="290" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="838" y="270" width="54" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_ManualReview_Rejected" bpmnElement="Flow_ManualReview_Rejected">
+        <di:waypoint x="795" y="265" />
+        <di:waypoint x="795" y="130" />
+        <di:waypoint x="498" y="130" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="730" y="110" width="46" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Timer_AutoCancel" bpmnElement="Flow_Timer_To_AutoCancel">
+        <di:waypoint x="640" y="348" />
+        <di:waypoint x="640" y="460" />
+        <di:waypoint x="518" y="460" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Message_UpdateSla" bpmnElement="Flow_Message_To_UpdateSla">
+        <di:waypoint x="690" y="348" />
+        <di:waypoint x="690" y="430" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_UpdateSla_End" bpmnElement="Flow_UpdateSla_To_End">
+        <di:waypoint x="800" y="470" />
+        <di:waypoint x="852" y="470" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Merge_To_Split" bpmnElement="Flow_Merge_To_ParallelSplit">
+        <di:waypoint x="935" y="290" />
+        <di:waypoint x="1000" y="290" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Split_Reserve" bpmnElement="Flow_To_ReserveInventory">
+        <di:waypoint x="1025" y="265" />
+        <di:waypoint x="1025" y="230" />
+        <di:waypoint x="1110" y="230" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Split_Invoice" bpmnElement="Flow_To_GenerateInvoice">
+        <di:waypoint x="1025" y="315" />
+        <di:waypoint x="1025" y="390" />
+        <di:waypoint x="1110" y="390" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Reserve_Join" bpmnElement="Flow_ReserveInventory_To_ParallelJoin">
+        <di:waypoint x="1260" y="230" />
+        <di:waypoint x="1350" y="230" />
+        <di:waypoint x="1350" y="265" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Invoice_Join" bpmnElement="Flow_GenerateInvoice_To_ParallelJoin">
+        <di:waypoint x="1260" y="390" />
+        <di:waypoint x="1350" y="390" />
+        <di:waypoint x="1350" y="315" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Join_NotificationSplit" bpmnElement="Flow_ParallelJoin_To_NotificationSplit">
+        <di:waypoint x="1375" y="290" />
+        <di:waypoint x="1440" y="290" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_OR_Email" bpmnElement="Flow_SendEmail">
+        <di:waypoint x="1465" y="265" />
+        <di:waypoint x="1465" y="230" />
+        <di:waypoint x="1560" y="230" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1476" y="240" width="62" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_OR_Sms" bpmnElement="Flow_SendSms">
+        <di:waypoint x="1465" y="315" />
+        <di:waypoint x="1465" y="390" />
+        <di:waypoint x="1560" y="390" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1476" y="345" width="52" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Email_ORJoin" bpmnElement="Flow_Email_To_NotificationJoin">
+        <di:waypoint x="1700" y="230" />
+        <di:waypoint x="1795" y="230" />
+        <di:waypoint x="1795" y="265" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_Sms_ORJoin" bpmnElement="Flow_Sms_To_NotificationJoin">
+        <di:waypoint x="1700" y="390" />
+        <di:waypoint x="1795" y="390" />
+        <di:waypoint x="1795" y="315" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="Edge_ORJoin_Fulfilled" bpmnElement="Flow_To_OrderFulfilled">
+        <di:waypoint x="1820" y="290" />
+        <di:waypoint x="1892" y="290" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

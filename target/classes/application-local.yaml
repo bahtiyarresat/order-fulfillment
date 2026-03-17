@@ -1,0 +1,30 @@
+# ════════════════════════════════════════════════════════════════════
+# Profile: local (default)
+#
+# Camunda 8 Run (c8run) for local setup.
+# https://github.com/camunda/camunda/releases
+#
+# Default ports:
+#   gRPC   → localhost:26500
+#   REST   → localhost:8080 (c8run default)
+#   Operate  → localhost:8080/operate  (demo/demo)
+#   Tasklist → localhost:8080/tasklist (demo/demo)
+#
+# Modeler connection:
+#   Target: Camunda 8 Self-Managed
+#   Cluster URL: http://localhost:8080
+#   Authentication: None
+# ════════════════════════════════════════════════════════════════════
+
+camunda:
+  client:
+    mode: self-managed
+    auth:
+      method: none
+    zeebe:
+      grpc-address: http://localhost:26500
+      rest-address: http://localhost:8080
+      prefer-rest-over-grpc: false
+    worker:
+      default-name: order-fulfillment-worker
+      default-max-jobs-active: 32
